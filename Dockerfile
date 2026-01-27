@@ -9,6 +9,13 @@ ENV STARTUPDIR=/dockerstartup
 ENV INST_SCRIPTS=${STARTUPDIR}/install
 WORKDIR ${HOME}
 
+######### Update Base Packages ###########
+
+# Upgrade system packages to fix known vulnerabilities
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 ######### Install Applications ###########
 
 # Application versions
@@ -30,11 +37,19 @@ RUN wget -q "https://download.delta.chat/desktop/v${DELTACHAT_VERSION}/deltachat
     && rm -f /tmp/deltachat.deb \
     && rm -rf /var/lib/apt/lists/*
 
-# Create desktop shortcuts for both applications
+# Install Vivaldi Browser
+RUN wget -qO- https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/vivaldi-browser.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/vivaldi-browser.gpg arch=amd64] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends vivaldi-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create desktop shortcuts for all applications
 RUN mkdir -p ${HOME}/Desktop \
     && cp /usr/share/applications/signal-desktop.desktop ${HOME}/Desktop/ \
     && cp /usr/share/applications/deltachat-desktop.desktop ${HOME}/Desktop/ 2>/dev/null \
     || cp /usr/share/applications/deltachat.desktop ${HOME}/Desktop/ 2>/dev/null || true \
+    && cp /usr/share/applications/vivaldi-stable.desktop ${HOME}/Desktop/ \
     && chmod +x ${HOME}/Desktop/*.desktop 2>/dev/null || true
 
 ######### End Application Installation ###########
