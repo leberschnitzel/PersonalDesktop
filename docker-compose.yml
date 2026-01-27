@@ -1,0 +1,15 @@
+services:
+  personal-desktop:
+    build:
+      context: .
+      args:
+        BASE_TAG: "1.18.0"
+        BASE_IMAGE: core-debian-trixie
+        DELTACHAT_VERSION: "2.35.0"
+    image: personal-desktop:latest
+    ports:
+      - "6901:6901"
+    environment:
+      - VNC_PW=password
+    shm_size: "512m"
+    restart: unless-stopped
