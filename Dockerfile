@@ -35,14 +35,16 @@ RUN wget -q "https://download.delta.chat/desktop/v${DELTACHAT_VERSION}/deltachat
     && apt-get update \
     && apt-get install -y --no-install-recommends /tmp/deltachat.deb \
     && rm -f /tmp/deltachat.deb \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's|Exec=/opt/DeltaChat/deltachat-desktop|Exec=/opt/DeltaChat/deltachat-desktop --no-sandbox|' /usr/share/applications/deltachat-desktop.desktop
 
 # Install Vivaldi Browser
 RUN wget -qO- https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/vivaldi-browser.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/vivaldi-browser.gpg arch=amd64] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends vivaldi-stable \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's|Exec=/usr/bin/vivaldi-stable|Exec=/usr/bin/vivaldi-stable --no-sandbox|g' /usr/share/applications/vivaldi-stable.desktop
 
 # Create desktop shortcuts for all applications
 RUN mkdir -p ${HOME}/Desktop \
