@@ -25,17 +25,17 @@ Default password: `password`
 
 Build the image:
 ```bash
-docker build -t personal-desktop .
+docker build -t personaldesktop .
 ```
 
 Run the container:
 ```bash
 docker run -d \
-  --name personal-desktop \
+  --name personaldesktop \
   -p 6901:6901 \
   -e VNC_PW=password \
   --shm-size=512m \
-  personal-desktop
+  personaldesktop
 ```
 
 ## Configuration
@@ -74,14 +74,7 @@ Signal and Vivaldi update automatically from their apt repositories on rebuild.
 
 To add this image as a workspace in your Kasm deployment:
 
-### 1. Build and push the image
-
-```bash
-docker build -t your-registry/personal-desktop:latest .
-docker push your-registry/personal-desktop:latest
-```
-
-### 2. Add the workspace in Kasm Admin
+### Add the workspace in Kasm Admin
 
 1. Log into Kasm as an administrator
 2. Navigate to **Workspaces** → **Workspaces**
@@ -94,15 +87,14 @@ docker push your-registry/personal-desktop:latest
 |-------|-------|
 | Friendly Name | `Personal Desktop` |
 | Description | `Secure desktop with Signal, Delta Chat, and Vivaldi browser for private communication` |
-| Thumbnail URL | `https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/XFCE_logo.png/240px-XFCE_logo.png` |
-| Enabled | `Yes` |
+| Thumbnail URL | `https://upload.wikimedia.org/wikipedia/commons/5/5b/Xfce_logo.svg` |
 
 #### Docker Settings
 
 | Field | Value |
 |-------|-------|
-| Docker Image | `your-registry/personal-desktop:latest` |
-| Docker Registry | *(your registry, or leave empty for Docker Hub)* |
+| Docker Image | `leberschnitzel/personaldesktop:latest` |
+| Docker Registry | `https://index.docker.io/v1/` |
 | Cores | `2` |
 | Memory (MB) | `2768` |
 | GPU Count | `0` |
@@ -112,40 +104,6 @@ docker push your-registry/personal-desktop:latest
 
 | Field | Value |
 |-------|-------|
-| Persistent Profile Path | `/home/kasm-user` *(if you want to persist user data)* |
-| Session Time Limit | *(as needed)* |
-| Volume Mappings | *(optional, e.g., `/data:/home/kasm-user/data`)* |
+| Persistent Profile Path | `/mnt/kasm_profiles/PersonalDesktop/{username}` *(if you want to persist user data)* |
 
 5. Click **Save**
-
-### 3. Workspace JSON (alternative)
-
-You can also import this workspace configuration via **Workspaces** → **Registry** → **Add** → **From JSON**:
-
-```json
-{
-  "friendly_name": "Personal Desktop",
-  "description": "Secure desktop with Signal, Delta Chat, and Vivaldi browser for private communication",
-  "thumbnail_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/XFCE_logo.png/240px-XFCE_logo.png",
-  "image_src": "your-registry/personal-desktop:latest",
-  "docker_registry": "",
-  "cores": 2,
-  "memory": 2768000000,
-  "gpu_count": 0,
-  "cpu_allocation_method": "Inherit",
-  "uncompressed_size_mb": 4700,
-  "categories": ["Desktop", "Communication"],
-  "require_gpu": false,
-  "enabled": true,
-  "hash": "",
-  "run_config": {
-    "hostname": "personal-desktop"
-  }
-}
-```
-
-### Registry options
-
-- **Docker Hub**: `yourusername/personal-desktop:latest`
-- **GitHub Container Registry**: `ghcr.io/yourusername/personal-desktop:latest`
-- **Private registry**: `registry.example.com/personal-desktop:latest`
