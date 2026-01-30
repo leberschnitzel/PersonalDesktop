@@ -44,7 +44,7 @@ RUN wget -qO- https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dea
     && apt-get update \
     && apt-get install -y --no-install-recommends vivaldi-stable \
     && rm -rf /var/lib/apt/lists/* \
-    && sed -i 's|Exec=/usr/bin/vivaldi-stable|Exec=/usr/bin/vivaldi-stable --no-sandbox|g' /usr/share/applications/vivaldi-stable.desktop
+    && sed -i 's|Exec=/usr/bin/vivaldi-stable %U|Exec=bash -c "rm -f ~/.config/vivaldi/SingletonLock; /usr/bin/vivaldi-stable --no-sandbox %U"|g' /usr/share/applications/vivaldi-stable.desktop
 
 # Create desktop shortcuts for all applications
 RUN mkdir -p ${HOME}/Desktop \
