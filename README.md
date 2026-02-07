@@ -1,24 +1,30 @@
-# PersonalDesktop
+# Personal Desktop Project
 
-A Kasm Workspaces desktop image based on Debian Trixie with secure messaging apps and a web browser pre-installed.
+A Dockerized personal workspace environment for secure communication and productivity. This project provides a preconfigured Kasm Workspaces-compatible image with XFCE, Signal, Delta Chat, and Vivaldi.
 
 ## Features
 
-- XFCE desktop environment
-- Signal Desktop messenger
-- Delta Chat Desktop messenger
-- Vivaldi web browser
-- Security updates applied at build time
+- **XFCE desktop environment**: Lightweight and customizable desktop experience.
+- **Signal Desktop messenger**: End-to-end encrypted messaging.
+- **Delta Chat Desktop messenger**: Secure alternative for private communication.
+- **Vivaldi web browser**: Privacy-focused browsing with built-in ad-blocking.
+- **Security updates applied at build time**: Regular security patches included.
+- **Kasm Workspaces integration**: Designed to work seamlessly in Kasm environments.
+
+## Security Notes
+
+- **Default credentials**: The default VNC password is `password`. Change this in production environments by setting the `VNC_PW` environment variable to a strong password.
+- **Sandboxing disabled**: Signal, Delta Chat, and Vivaldi are run with `--no-sandbox` to work within the container. This reduces isolation between applications and the system. For production deployments, consider implementing additional security controls.
 
 ## Quick Start
 
-### Using Docker Compose (recommended)
+### Testing using Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
-Access the desktop at: `https://localhost:6901`
+Access the desktop at: `http://localhost:6901`
 Default password: `password`
 
 ### Using Docker directly
@@ -53,6 +59,10 @@ docker run -d \
 | `BASE_TAG` | 1.18.0 | Kasm base image tag |
 | `BASE_IMAGE` | core-debian-trixie | Kasm base image name |
 | `DELTACHAT_VERSION` | 2.35.0 | Delta Chat version to install |
+
+### Startup Script
+
+The project includes a custom startup script ([custom_startup.sh](custom_startup.sh)) that handles desktop initialization for Kasm Workspaces. It signals when the desktop environment is ready and can be customized for additional launch tasks.
 
 ## Usage
 
@@ -96,14 +106,9 @@ To add this image as a workspace in your Kasm deployment:
 | Docker Image | `leberschnitzel/personaldesktop:latest` |
 | Docker Registry | `https://index.docker.io/v1/` |
 | Cores | `2` |
-| Memory (MB) | `2768` |
+| Memory (MB) | `4096` |
 | GPU Count | `0` |
 | CPU Allocation Method | `Inherit` |
 
-#### Optional Settings
-
-| Field | Value |
-|-------|-------|
-| Persistent Profile Path | `/mnt/kasm_profiles/PersonalDesktop/{username}` *(if you want to persist user data)* |
-
 5. Click **Save**
+
