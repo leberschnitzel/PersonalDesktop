@@ -11,6 +11,49 @@ A Dockerized personal workspace environment for secure communication and product
 - **Security updates applied at build time**: Regular security patches included.
 - **Kasm Workspaces integration**: Designed to work seamlessly in Kasm environments.
 
+## Dockerfile Options
+
+This project includes two Dockerfiles with different optimization strategies:
+
+### Standard Dockerfile (Dockerfile)
+
+The default Dockerfile uses separate RUN layers for each browser installation, making it easier to debug but resulting in a larger image.
+
+### Optimized Dockerfile (Dockerfile.optimized)
+
+The optimized version consolidates all browser installations into a **single RUN layer** with unified cleanup:
+
+| Aspect | Dockerfile | Dockerfile.optimized |
+|--------|------------|---------------------|
+| Browser install layers | 3 separate layers | 1 combined layer |
+| apt-get update calls | 3 calls | 1 call |
+| Image size | Larger | Smaller |
+
+#### How It Works
+
+The optimized Dockerfile performs all operations in one atomic layer:
+1. Downloads GPG keys and adds apt sources for all browsers
+2. Runs a single `apt-get update` for all package installations
+3. Installs Signal Desktop, Vivaldi, and Delta Chat together
+4. Updates desktop entries with `--no-sandbox` flags
+5. Cleans up apt sources, temp files, and apt lists in the same layer
+
+#### Usage
+
+```bash
+# Build with optimized Dockerfile
+docker build -f Dockerfile.optimized -t personaldesktop:optimized .
+
+# Using docker-compose, specify the dockerfile:
+services:
+  personaldesktop:
+    build:
+      context: .
+      dockerfile: Dockerfile.optimized
+```
+
+Both Dockerfiles produce functionally identical containers. Choose the optimized version when image size matters or for faster builds.
+
 ## Security Notes
 
 - **Default credentials**: The default VNC password is `password`. Change this in production environments by setting the `VNC_PW` environment variable to a strong password.
@@ -111,4 +154,3 @@ To add this image as a workspace in your Kasm deployment:
 | CPU Allocation Method | `Inherit` |
 
 5. Click **Save**
-
