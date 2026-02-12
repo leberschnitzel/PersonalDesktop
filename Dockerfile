@@ -17,36 +17,39 @@ RUN apt-get update \
 # Version pinning
 ARG DELTACHAT_VERSION="2.35.0"
 
-# Signal Desktop - add repo and install with --no-sandbox for container use
+# Optimize: Combined RUN command for all browser installs with unified cleanup
+# 1. Download all keys and add repos
+# 2. Install all packages in single apt-get update call
+# 3. Update desktop entries
+# 4. Cleanup everything in same layer
 RUN mkdir -p /usr/share/keyrings \
+    # Signal Desktop key
     && wget -qO- https://updates.signal.org/desktop/apt/keys.asc | gpg --dearmor > /usr/share/keyrings/signal-desktop-keyring.gpg \
+    # Delta Chat key (use same keyring file, different name to avoid confusion)
+    && wget -qO- "https://download.delta.chat/desktop/v${DELTACHAT_VERSION}/deltachat-desktop_${DELTACHAT_VERSION}_amd64.deb" -O /tmp/deltachat.deb \
+    # Vivaldi key
+    && wget -qO- https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/vivaldi-browser.gpg \
+    # Add repos (using xenial for Signal as original, stable for Vivaldi)
     && echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' > /etc/apt/sources.list.d/signal-xenial.list \
+    && echo "deb [signed-by=/usr/share/keyrings/vivaldi-browser.gpg arch=amd64] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list \
+    # Update and install all in one go
     && apt-get update \
-    && apt-get install -y --no-install-recommends signal-desktop \
+    && apt-get install -y --no-install-recommends signal-desktop vivaldi-stable \
+    && apt-get install -y --no-install-recommends /tmp/deltachat.deb \
+    # Update desktop entries with --no-sandbox for container use
     && sed -i 's|Exec=/opt/Signal/signal-desktop %U|Exec=/opt/Signal/signal-desktop --no-sandbox %U|' /usr/share/applications/signal-desktop.desktop \
+    && sed -i 's|Exec=/opt/DeltaChat/deltachat-desktop|Exec=/opt/DeltaChat/deltachat-desktop --no-sandbox|' /usr/share/applications/deltachat-desktop.desktop \
+    && sed -i 's|Exec=/usr/bin/vivaldi-stable %U|Exec=bash -c "rm -f ~/.config/vivaldi/SingletonLock; /usr/bin/vivaldi-stable --no-sandbox %U"|' /usr/share/applications/vivaldi-stable.desktop \
+    # Cleanup apt sources (optional - saves ~2KB per file)
+    && rm -f /etc/apt/sources.list.d/signal-xenial.list /etc/apt/sources.list.d/vivaldi.list \
+    # Clean up temp files
+    && rm -f /tmp/deltachat.deb \
     && rm -rf /var/lib/apt/lists/*
 
-# Delta Chat - download and install .deb with --no-sandbox for container use
-RUN wget -q "https://download.delta.chat/desktop/v${DELTACHAT_VERSION}/deltachat-desktop_${DELTACHAT_VERSION}_amd64.deb" -O /tmp/deltachat.deb \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends /tmp/deltachat.deb \
-    && rm -f /tmp/deltachat.deb \
-    && rm -rf /var/lib/apt/lists/* \
-    && sed -i 's|Exec=/opt/DeltaChat/deltachat-desktop|Exec=/opt/DeltaChat/deltachat-desktop --no-sandbox|' /usr/share/applications/deltachat-desktop.desktop
-
-# Vivaldi - add repo and install, clear stale lockfile on launch, --no-sandbox for container use
-RUN wget -qO- https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/vivaldi-browser.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/vivaldi-browser.gpg arch=amd64] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends vivaldi-stable \
-    && rm -rf /var/lib/apt/lists/* \
-    && sed -i 's|Exec=/usr/bin/vivaldi-stable %U|Exec=bash -c "rm -f ~/.config/vivaldi/SingletonLock; /usr/bin/vivaldi-stable --no-sandbox %U"|g' /usr/share/applications/vivaldi-stable.desktop
-
-# Copy .desktop shortcuts to user's Desktop folder
+# Copy .desktop shortcuts to user's Desktop folder (now using optimized cleanup)
 RUN mkdir -p ${HOME}/Desktop \
     && cp /usr/share/applications/signal-desktop.desktop ${HOME}/Desktop/ \
-    && cp /usr/share/applications/deltachat-desktop.desktop ${HOME}/Desktop/ 2>/dev/null \
-    || cp /usr/share/applications/deltachat.desktop ${HOME}/Desktop/ 2>/dev/null || true \
+    && cp /usr/share/applications/deltachat-desktop.desktop ${HOME}/Desktop/ 2>/dev/null || true \
     && cp /usr/share/applications/vivaldi-stable.desktop ${HOME}/Desktop/ \
     && chmod +x ${HOME}/Desktop/*.desktop 2>/dev/null || true
 

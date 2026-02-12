@@ -115,6 +115,8 @@ The project includes a custom startup script ([custom_startup.sh](custom_startup
 
 ## Updating Applications
 
+### Manual Update
+
 To update Delta Chat, change the `DELTACHAT_VERSION` build argument and rebuild:
 
 ```bash
@@ -122,6 +124,39 @@ docker compose build --build-arg DELTACHAT_VERSION=2.36.0
 ```
 
 Signal and Vivaldi update automatically from their apt repositories on rebuild.
+
+### Automated Update Script
+
+This project includes an automated script ([check-update.sh](check-update.sh)) that checks for updates to all applications and rebuilds the image when newer versions are available:
+
+```bash
+./check-update.sh
+```
+
+**What it does:**
+- Checks Signal Desktop, DeltaChat, Vivaldi, and base image for newer versions
+- Updates `Dockerfile` ARG values automatically if updates are found
+- Builds the updated image and runs tests to verify functionality
+- Deletes the backup file after a successful build
+
+**Build Arguments Managed by Script:**
+
+| Argument | Description |
+|----------|-------------|
+| `BASE_TAG` | Kasm base image tag (e.g., 1.18.0) |
+| `DELTACHAT_VERSION` | Delta Chat version to install |
+
+**Usage Examples:**
+
+```bash
+# Check for updates and rebuild if needed
+./check-update.sh
+
+# Run with verbose output for troubleshooting
+bash -x ./check-update.sh
+```
+
+The script creates a `Dockerfile.original` backup before making changes. This backup is automatically deleted after a successful build or when no updates are needed.
 
 ## Adding to Kasm Workspaces
 
