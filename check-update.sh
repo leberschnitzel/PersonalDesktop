@@ -28,18 +28,46 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+# Get version of installed package from a container (not running, just instantiated)
+get_container_version() {
+    local app_name="$1"
+    local container_id
+
+    # Create the container with a sleep command to keep it alive for exec
+    container_id=$(docker create leberschnitzel/personaldesktop:latest "/bin/sleep infinity" 2>/dev/null)
+
+    if [ -n "$container_id" ]; then
+        # Start the container in background
+        docker start "$container_id" >/dev/null 2>&1 || true
+
+        # Give it a moment to fully start
+        sleep 2
+
+        # Use dpkg-query from within the container to get version info reliably
+        local version=""
+        version=$(docker exec "$container_id" dpkg-query --showformat='${Version}' --show "$app_name" 2>/dev/null) || true
+
+        # Stop and remove the container
+        docker stop "$container_id" >/dev/null 2>&1 || true
+        docker rm "$container_id" >/dev/null 2>&1 || true
+
+        if [ -n "$version" ]; then
+            echo "$version"
+        fi
+    fi
+}
+
 # Parse Dockerfile ARGs (strip ANSI codes)
 parse_arg() {
     local arg_name="$1"
     grep "^ARG ${arg_name}" "$DOCKERFILE" | sed "s/.*=.*\"\([^\"]*\)\".*/\1/" | head -1 | sed 's/\x1b\[[0-9;]*m//g'
 }
 
-# Check Signal Desktop version
+# Check Signal Desktop version from apt repo
 check_signal_version() {
-    log_info "Checking Signal Desktop latest version..."
     local json_url="https://updates.signal.org/desktop/apt/dists/xenial/main/binary-amd64/Packages.gz"
     if command -v curl &> /dev/null; then
-        local result=$(curl -sSL "$json_url" 2>/dev/null | zcat 2>/dev/null | grep -A5 "Package: signal-desktop" | head -10 | grep Version | awk '{print $2}' | sed 's/\x1b\[[0-9;]*m//g')
+        local result=$(curl -sSL "$json_url" 2>/dev/null | zcat 2>/dev/null | grep -A10 "^Package: signal-desktop$" | head -15 | grep "^Version:" | awk '{print $2}' | sed 's/\x1b\[[0-9;]*m//g' | head -1)
         echo "$result"
     else
         log_warning "curl not available, skipping Signal version check"
@@ -47,12 +75,11 @@ check_signal_version() {
     fi
 }
 
-# Check Vivaldi version
+# Check Vivaldi version from apt repo
 check_vivaldi_version() {
-    log_info "Checking Vivaldi latest version..."
     local repo_url="https://repo.vivaldi.com/archive/deb/dists/stable/main/binary-amd64/Packages.gz"
     if command -v curl &> /dev/null; then
-        local result=$(curl -sSL "$repo_url" 2>/dev/null | zcat 2>/dev/null | grep "^Package: vivaldi-stable" -A10 | head -15 | grep Version | awk '{print $2}' | sed 's/\x1b\[[0-9;]*m//g')
+        local result=$(curl -sSL "$repo_url" 2>/dev/null | zcat 2>/dev/null | grep "^Package: vivaldi-stable" -A10 | head -15 | grep "Version:" | awk '{print $2}' | sed 's/\x1b\[[0-9;]*m//g' | head -1)
         echo "$result"
     else
         log_warning "curl not available, skipping Vivaldi version check"
@@ -136,6 +163,69 @@ update_dockerfile_arg() {
     sed -i "s/^ARG ${param_name}=.*/ARG ${param_name}=\"${escaped_new}\"/" "$DOCKERFILE"
 }
 
+# Extract installed versions from a container after a build
+extract_versions_from_build() {
+    local image_name="$1"
+
+    # Create and start container temporarily to extract versions
+    local container_id=$(docker create "$image_name" "/bin/sleep infinity" 2>/dev/null)
+    if [ -n "$container_id" ]; then
+        docker start "$container_id" >/dev/null 2>&1 || true
+        sleep 2
+
+        # Extract versions using dpkg-query
+        local signal_ver=$(docker exec "$container_id" dpkg-query --showformat='${Version}' --show signal-desktop 2>/dev/null || echo "")
+        local vivaldi_ver=$(docker exec "$container_id" dpkg-query --showformat='${Version}' --show vivaldi-stable 2>/dev/null || echo "")
+
+        # Stop and remove the container
+        docker stop "$container_id" >/dev/null 2>&1 || true
+        docker rm "$container_id" >/dev/null 2>&1 || true
+
+        if [ -n "$signal_ver" ]; then
+            echo "SIGNAL_VERSION=$signal_ver"
+        fi
+        if [ -n "$vivaldi_ver" ]; then
+            echo "VIVALDI_VERSION=$vivaldi_ver"
+        fi
+    fi
+}
+
+# Build and update Dockerfile with detected versions
+build_and_update_versions() {
+    local temp_image="kasm-temp-$(date +%Y%m%d-%H%M%S)"
+
+    log_info "Building temporary image to detect installed versions..."
+
+    if ! docker build -f "$DOCKERFILE" -t "$temp_image" . 2>&1 | tee /tmp/docker-build.log; then
+        log_error "Build failed!"
+        return 1
+    fi
+
+    log_success "Build successful! Extracting versions from running container..."
+
+    # Extract versions and update Dockerfile
+    local versions=$(extract_versions_from_build "$temp_image")
+
+    if [ -n "$versions" ]; then
+        log_info "Detected versions from build:"
+        echo "$versions" | while read line; do
+            local key=$(echo "$line" | cut -d= -f1)
+            local value=$(echo "$line" | cut -d= -f2-)
+            log_success "  $key: $value"
+
+            # Update Dockerfile with detected version
+            if grep -q "^ARG ${key}=" "$DOCKERFILE"; then
+                update_dockerfile_arg "$key" "$value"
+            fi
+        done
+    else
+        log_warning "Could not extract versions from build, using Dockerfile values"
+    fi
+
+    # Cleanup temp image
+    docker rmi -f "$temp_image" 2>/dev/null || true
+}
+
 build_and_test() {
     local test_image="kasm-test:updated-$(date +%Y%m%d-%H%M%S)"
 
@@ -179,6 +269,19 @@ build_and_test() {
 
         if [ "$apps_ok" = true ]; then
             log_success "All applications installed successfully!"
+
+            # Get versions and update Dockerfile for future builds
+            local signal_ver=$(docker exec "$container_name" dpkg-query --showformat='${Version}' --show signal-desktop 2>/dev/null || echo "")
+            local vivaldi_ver=$(docker exec "$container_name" dpkg-query --showformat='${Version}' --show vivaldi-stable 2>/dev/null || echo "")
+
+            if [ -n "$signal_ver" ]; then
+                log_info "Detected Signal version in running container: $signal_ver"
+                # Don't update SIGNAL_VERSION here since it's fetched during build from apt repo
+            fi
+            if [ -n "$vivaldi_ver" ]; then
+                log_info "Detected Vivaldi version in running container: $vivaldi_ver"
+                # Vivaldi doesn't have an ARG yet, so we just report it
+            fi
         fi
     else
         # Try again with different entrypoint for debugging
@@ -199,6 +302,46 @@ build_and_test() {
     log_success "Test completed!"
 }
 
+# Clean up temporary files and resources
+cleanup() {
+    log_info "Cleaning up temporary files..."
+
+    # Remove backup files created during updates
+    rm -f "${DOCKERFILE}.bak" 2>/dev/null || true
+
+    # Remove original backup if it exists (from a previous run)
+    if [ -f "${DOCKERFILE}.original" ]; then
+        rm -f "${DOCKERFILE}.original"
+        log_info "Removed ${DOCKERFILE}.original"
+    fi
+
+    # Clean up any stopped containers from testing
+    docker container prune -f 2>/dev/null || true
+
+    # Clean up dangling images (but not our test image which we want to inspect)
+    docker image prune -f 2>/dev/null || true
+
+    log_success "Cleanup completed!"
+}
+
+# Get installed versions from a running container
+get_installed_versions() {
+    local container_name="$1"
+
+    local signal_ver=$(docker exec "$container_name" dpkg-query --showformat='${Version}' --show signal-desktop 2>/dev/null || echo "")
+    local vivaldi_ver=$(docker exec "$container_name" dpkg-query --showformat='${Version}' --show vivaldi-stable 2>/dev/null || echo "")
+    local deltachat_ver=$(docker exec "$container_name" dpkg-query --showformat='${Version}' --show deltachat-desktop 2>/dev/null || echo "")
+
+    echo "SIGNAL_VER=$signal_ver"
+    echo "VIVALDI_VER=$vivaldi_ver"
+    echo "DELTACHAT_VER=$deltachat_ver"
+}
+
+# Parse version string to remove any distro suffix (e.g., 1.2.3-1mmj1 -> 1.2.3)
+normalize_version() {
+    echo "$1" | sed 's/-[0-9]*$//'
+}
+
 # Main logic
 main() {
     echo "========================================"
@@ -211,101 +354,156 @@ main() {
         log_info "Created original backup: ${DOCKERFILE}.original"
     fi
 
-    local updated=false
-
-    # Check Signal Desktop version
+    # Step 1: Check online for latest versions
     echo ""
-    signal_latest=$(check_signal_version)
-    signal_current=$(parse_arg "SIGNAL_VERSION")
+    log_info "Step 1: Checking online for newer versions..."
 
-    if [ -n "$signal_latest" ] && [ "$signal_latest" != "$signal_current" ]; then
-        log_warning "New Signal version available: $signal_latest (current: $signal_current)"
-        update_dockerfile_arg "SIGNAL_VERSION" "$signal_latest"
-        updated=true
-    else
-        log_success "Signal Desktop is up to date ($signal_current)"
-    fi
+    local delta_latest_raw=$(check_deltachat_version)
+    local delta_latest=$(echo "$delta_latest_raw" | sed 's/^v//')
+    local signal_latest=$(check_signal_version)
+    local vivaldi_latest=$(check_vivaldi_version)
 
-    # Check DeltaChat version - normalize by stripping 'v' prefix for comparison
+    # Normalize versions for comparison
+    local delta_latest_norm=$(normalize_version "$delta_latest")
+    local signal_latest_norm=$(normalize_version "$signal_latest")
+    local vivaldi_latest_norm=$(normalize_version "$vivaldi_latest")
+
     echo ""
-    delta_latest_raw=$(check_deltachat_version)
-    # Strip 'v' prefix if present (Dockerfile uses 2.35.0, not v2.35.0)
-    delta_latest=$(echo "$delta_latest_raw" | sed 's/^v//')
-    delta_current=$(parse_arg "DELTACHAT_VERSION")
+    log_success "Latest online - DeltaChat: $delta_latest, Signal: $signal_latest, Vivaldi: $vivaldi_latest"
 
-    if [ -n "$delta_latest" ] && [ "$delta_latest" != "$delta_current" ]; then
-        log_warning "New DeltaChat version available: $delta_latest (current: $delta_current)"
-        update_dockerfile_arg "DELTACHAT_VERSION" "$delta_latest"
-        updated=true
-    else
-        log_success "DeltaChat is up to date ($delta_current)"
-    fi
-
-    # Check Vivaldi version
+    # Step 2: Pull the current image from Docker Hub and check versions
     echo ""
-    vivaldi_latest=$(check_vivaldi_version)
+    log_info "Step 2: Pulling leberschnitzel/personaldesktop:latest from Docker Hub..."
 
-    if [ -n "$vivaldi_latest" ]; then
-        log_info "Latest Vivaldi: $vivaldi_latest"
-    fi
+    local needs_update=false
 
-    # Check base image tag
-    echo ""
-    base_tag=$(parse_arg "BASE_TAG")
-    base_image_name="kasmweb/core-debian-trixie"
+    if docker pull leberschnitzel/personaldesktop:latest 2>/dev/null; then
+        log_success "Successfully pulled latest image"
 
-    latest_base_tag=$(check_base_image)
+        # Create container from pulled image to check installed versions
+        echo ""
+        log_info "Checking currently installed versions in pulled image..."
+        local pull_container_id=$(docker create leberschnitzel/personaldesktop:latest "/bin/sleep infinity" 2>/dev/null)
 
-    if [ -n "$latest_base_tag" ] && [ "$latest_base_tag" != "$base_tag" ]; then
-        log_warning "New base image tag available: $latest_base_tag (current: $base_tag)"
-        update_dockerfile_arg "BASE_TAG" "$latest_base_tag"
-        updated=true
-    else
-        if [ -n "$latest_base_tag" ] && [ "$latest_base_tag" == "$base_tag" ]; then
-            log_success "Base image is up to date (${base_image_name}:${base_tag})"
+        if [ -n "$pull_container_id" ]; then
+            docker start "$pull_container_id" >/dev/null 2>&1 || true
+            sleep 3
+
+            local installed_versions=$(get_installed_versions "$pull_container_id")
+
+            # Parse installed versions
+            local delta_current=$(echo "$installed_versions" | grep "DELTACHAT_VER=" | cut -d= -f2)
+            local signal_current=$(echo "$installed_versions" | grep "SIGNAL_VER=" | cut -d= -f2)
+            local vivaldi_current=$(echo "$installed_versions" | grep "VIVALDI_VER=" | cut -d= -f2)
+
+            # Normalize current versions for comparison
+            local delta_current_norm=$(normalize_version "$delta_current")
+            local signal_current_norm=$(normalize_version "$signal_current")
+            local vivaldi_current_norm=$(normalize_version "$vivaldi_current")
+
+            log_success "Currently installed in Docker Hub image: DeltaChat: $delta_current, Signal: $signal_current, Vivaldi: $vivaldi_current"
+
+            # Stop and remove the test container
+            docker stop "$pull_container_id" >/dev/null 2>&1 || true
+            docker rm "$pull_container_id" >/dev/null 2>&1 || true
+
+            echo ""
+            log_info "Step 3: Comparing versions..."
+
+            # Compare DeltaChat
+            if [ -n "$delta_latest_norm" ] && [ -n "$delta_current_norm" ] && [ "$delta_latest_norm" != "$delta_current_norm" ]; then
+                log_warning "DeltaChat needs update: online=$delta_latest, installed=$delta_current"
+                needs_update=true
+            else
+                log_success "DeltaChat is up to date ($delta_current)"
+            fi
+
+            # Compare Signal
+            if [ -n "$signal_latest_norm" ] && [ -n "$signal_current_norm" ] && [ "$signal_latest_norm" != "$signal_current_norm" ]; then
+                log_warning "Signal needs update: online=$signal_latest, installed=$signal_current"
+                needs_update=true
+            else
+                log_success "Signal is up to date ($signal_current)"
+            fi
+
+            # Compare Vivaldi
+            if [ -n "$vivaldi_latest_norm" ] && [ -n "$vivaldi_current_norm" ] && [ "$vivaldi_latest_norm" != "$vivaldi_current_norm" ]; then
+                log_warning "Vivaldi needs update: online=$vivaldi_latest, installed=$vivaldi_current"
+                needs_update=true
+            else
+                log_success "Vivaldi is up to date ($vivaldi_current)"
+            fi
+
+        else
+            log_error "Failed to create container from pulled image"
+            exit 1
         fi
+
+    else
+        log_info "No existing image on Docker Hub - will build fresh"
+        needs_update=true
     fi
 
     echo ""
     echo "========================================"
 
-    if [ "$updated" = true ]; then
-        log_info "Dockerfile was modified. Starting build and test..."
+    # Step 4: Update Dockerfile and rebuild if needed
+    if [ "$needs_update" = true ]; then
+        log_info "Step 4: Updates detected. Updating Dockerfile..."
 
-        # Verify the Dockerfile is valid before building
-        if grep -q "^FROM kasmweb/" "$DOCKERFILE"; then
-            build_and_test
+        # Get current versions from Dockerfile for comparison
+        local deltafile_current=$(parse_arg "DELTACHAT_VERSION")
+
+        # Update DeltaChat version in Dockerfile if different from what will be installed
+        if [ -n "$delta_latest" ] && [ -n "$deltafile_current" ] && [ "$delta_latest" != "$deltafile_current" ]; then
+            log_info "Updating DELTACHAT_VERSION: $deltafile_current -> $delta_latest"
+            update_dockerfile_arg "DELTACHAT_VERSION" "$delta_latest"
+        else
+            log_success "DeltaChat version in Dockerfile is current ($deltafile_current)"
+        fi
+
+        # Build the new image as leberschnitzel/personaldesktop:latest
+        local build_image="leberschnitzel/personaldesktop:latest"
+        echo ""
+        log_info "Step 5: Building Docker image $build_image..."
+
+        if docker build -f "$DOCKERFILE" -t "$build_image" . 2>&1 | tee /tmp/docker-build.log; then
+            log_success "Build successful!"
+
+            # Quick test to verify the image works
+            local test_container="test-$(date +%s)"
+            if docker create --name "$test_container" --rm "$build_image" /bin/sleep 3 >/dev/null 2>&1; then
+                sleep 2
+                log_success "Container test passed!"
+            fi
+            docker rm -f "$test_container" 2>/dev/null || true
 
             echo ""
-            log_success "Update process completed!"
+            log_success "Image ready for deployment!"
+            echo ""
+            echo "To push the updated image, run:"
+            echo "  docker push $build_image"
+            echo ""
 
-            # Show summary of changes
-            if [ -f "${DOCKERFILE}.original" ]; then
-                echo ""
-                echo "Changes made (diff):"
-                diff -u "${DOCKERFILE}.original" "$DOCKERFILE" || true
-
-                # Delete the original backup after successful build
-                rm -f "${DOCKERFILE}.original"
-                log_info "Deleted ${DOCKERFILE}.original (build successful)"
-            fi
         else
-            log_error "Dockerfile appears to be corrupted!"
+            log_error "Build failed!"
             if [ -f "${DOCKERFILE}.original" ]; then
                 cp "${DOCKERFILE}.original" "$DOCKERFILE"
             fi
             exit 1
         fi
+
     else
+        # No updates available
         echo ""
         log_success "All components are already up to date!"
-
-        # Delete the original backup when no update is needed
-        if [ -f "${DOCKERFILE}.original" ]; then
-            rm -f "${DOCKERFILE}.original"
-            log_info "Deleted ${DOCKERFILE}.original (no update needed)"
-        fi
+        echo ""
+        log_info "No rebuild needed. Image is ready to use."
     fi
+
+    # Cleanup temp files but keep the latest image
+    echo ""
+    cleanup
 
     echo "========================================"
 }
